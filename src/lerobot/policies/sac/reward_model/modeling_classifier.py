@@ -15,13 +15,15 @@
 # limitations under the License.
 
 import logging
+import math
 
 import torch
 from torch import Tensor, nn
 
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.sac.reward_model.configuration_classifier import RewardClassifierConfig
-from lerobot.utils.constants import OBS_IMAGE, REWARD
+from lerobot.utils.constants import OBS_IMAGE, OBS_STATE, REWARD
+from lerobot.configs.types import FeatureType
 
 
 class ClassifierOutput:
@@ -138,11 +140,35 @@ class Classifier(PreTrainedPolicy):
             key.replace(".", "_") for key in config.input_features if key.startswith(OBS_IMAGE)
         ]
 
+        # Extract state keys (non-visual) from input_features
+        self.state_keys = [
+            key for key, ft in config.input_features.items() if getattr(ft, "type", None) == FeatureType.STATE
+        ]
+
         if self.is_cnn:
             self.encoders = nn.ModuleDict()
             for image_key in self.image_keys:
                 encoder = self._create_single_encoder()
                 self.encoders[image_key] = encoder
+
+        # Small MLP to embed state features (if present) to the same latent dim
+        if len(self.state_keys) > 0:
+            # Use fixed state width from config (strict, no lazy initialization).
+            self.state_dim = int(
+                sum(math.prod(config.input_features[k].shape) for k in self.state_keys)
+            )
+            self.state_mlp = nn.Sequential(
+                nn.Linear(self.state_dim, self.config.latent_dim),
+                nn.LayerNorm(self.config.latent_dim),
+                nn.ReLU(),
+                nn.Dropout(self.config.dropout_rate),
+                nn.Linear(self.config.latent_dim, self.config.latent_dim),
+                nn.LayerNorm(self.config.latent_dim),
+                nn.Tanh(),
+            )
+        else:
+            self.state_dim = 0
+            self.state_mlp = None
 
         self._build_classifier_head()
 
@@ -182,7 +208,12 @@ class Classifier(PreTrainedPolicy):
         """Initialize the classifier head architecture."""
         # Get input dimension based on model type
         if self.is_cnn:
-            input_dim = self.config.latent_dim
+            # image embeddings from all cameras
+            image_dim = self.config.latent_dim * self.config.num_cameras
+            if self.state_mlp is not None:
+                input_dim = image_dim + self.config.latent_dim
+            else:
+                input_dim = image_dim
         else:  # Transformer models
             if hasattr(self.encoder.config, "hidden_size"):
                 input_dim = self.encoder.config.hidden_size
@@ -190,7 +221,7 @@ class Classifier(PreTrainedPolicy):
                 raise ValueError("Unsupported transformer architecture since hidden_size is not found")
 
         self.classifier_head = nn.Sequential(
-            nn.Linear(input_dim * self.config.num_cameras, self.config.hidden_dim),
+            nn.Linear(input_dim, self.config.hidden_dim),
             nn.Dropout(self.config.dropout_rate),
             nn.LayerNorm(self.config.hidden_dim),
             nn.ReLU(),
@@ -211,19 +242,44 @@ class Classifier(PreTrainedPolicy):
                 outputs = self.encoder(x)
                 return outputs.last_hidden_state[:, 0, :]
 
-    def extract_images_and_labels(self, batch: dict[str, Tensor]) -> tuple[list, Tensor]:
-        """Extract image tensors and label tensors from batch."""
+    def extract_images_and_labels(self, batch: dict[str, Tensor]) -> tuple[list, Tensor, Tensor | None]:
+        """Extract image tensors, label tensors and optional state tensor from batch."""
         # Check for both OBS_IMAGE and OBS_IMAGES prefixes
         images = [batch[key] for key in self.config.input_features if key.startswith(OBS_IMAGE)]
         labels = batch[REWARD]
 
-        return images, labels
+        state_tensor = None
+        if len(self.state_keys) > 0:
+            states = [batch[k] for k in self.state_keys]
+            # flatten per-state tensors to [B, N]
+            states = [s.view(s.size(0), -1) for s in states]
+            state_tensor = torch.cat(states, dim=1)
+            if state_tensor.shape[1] != self.state_dim:
+                raise ValueError(
+                    f"State feature dimension mismatch: got {state_tensor.shape[1]} from batch, "
+                    f"expected {self.state_dim} from input_features for keys={self.state_keys}. "
+                    "Update policy.input_features STATE shapes to match the actual dataset/preprocessor output."
+                )
 
-    def predict(self, xs: list) -> ClassifierOutput:
+        return images, labels, state_tensor
+
+    def predict(self, xs: list, state: Tensor | None = None) -> ClassifierOutput:
         """Forward pass of the classifier for inference."""
         encoder_outputs = torch.hstack(
             [self._get_encoder_output(x, img_key) for x, img_key in zip(xs, self.image_keys, strict=True)]
         )
+
+        # If state MLP exists, always embed state (use zeros if not provided)
+        if self.state_mlp is not None:
+            if state is None:
+                # Use zero state tensor to maintain expected input dimension
+                state = torch.zeros(
+                    encoder_outputs.shape[0], self.state_dim, 
+                    dtype=encoder_outputs.dtype, device=encoder_outputs.device
+                )
+            state_emb = self.state_mlp(state)
+            encoder_outputs = torch.cat([encoder_outputs, state_emb], dim=1)
+
         logits = self.classifier_head(encoder_outputs)
 
         if self.config.num_classes == 2:
@@ -234,13 +290,35 @@ class Classifier(PreTrainedPolicy):
 
         return ClassifierOutput(logits=logits, probabilities=probabilities, hidden_states=encoder_outputs)
 
+    def _prepare_inference_image(self, image) -> Tensor:
+        """Convert env observations to model-ready BCHW float tensors on the model device."""
+        tensor = torch.as_tensor(image)
+
+        # Accept single images (HWC or CHW) and batched images (BHWC or BCHW).
+        if tensor.ndim == 3:
+            tensor = tensor.unsqueeze(0)
+        if tensor.ndim != 4:
+            raise ValueError(f"Expected image tensor with 3 or 4 dims, got shape {tuple(tensor.shape)}")
+
+        # Convert channel-last BHWC to channel-first BCHW when needed.
+        if tensor.shape[-1] in (1, 3) and tensor.shape[1] not in (1, 3):
+            tensor = tensor.permute(0, 3, 1, 2).contiguous()
+
+        input_dtype = tensor.dtype
+        tensor = tensor.to(dtype=torch.float32)
+        if input_dtype == torch.uint8:
+            tensor /= 255.0
+
+        model_device = next(self.parameters()).device
+        return tensor.to(model_device)
+
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict[str, Tensor]]:
         """Standard forward pass for training compatible with train.py."""
         # Extract images and labels
-        images, labels = self.extract_images_and_labels(batch)
+        images, labels, state = self.extract_images_and_labels(batch)
 
-        # Get predictions
-        outputs = self.predict(images)
+        # Get predictions (pass state embedding if present)
+        outputs = self.predict(images, state)
 
         # Calculate loss
         if self.config.num_classes == 2:
@@ -268,19 +346,38 @@ class Classifier(PreTrainedPolicy):
 
     def predict_reward(self, batch, threshold=0.5):
         """Eval method. Returns predicted reward with the decision threshold as argument."""
-        # Check for both OBS_IMAGE and OBS_IMAGES prefixes
-        batch = self.normalize_inputs(batch)
-        batch = self.normalize_targets(batch)
+        # For online env inference, we may receive raw uint8 HWC frames.
+        # Convert them here instead of relying on legacy normalize_* modules.
+        images = [
+            self._prepare_inference_image(batch[key])
+            for key in self.config.input_features
+            if key.startswith(OBS_IMAGE)
+        ]
 
-        # Extract images from batch dict
-        images = [batch[key] for key in self.config.input_features if key.startswith(OBS_IMAGE)]
+        # Prepare state tensor if available in batch.
+        # Note: If state_keys are configured but not in batch, predict() will use zeros.
+        state = None
+        if len(self.state_keys) > 0:
+            state_parts = []
+            for k in self.state_keys:
+                if k in batch:
+                    s = torch.as_tensor(batch[k])
+                    if s.ndim == 1:
+                        s = s.unsqueeze(0)
+                    s = s.to(dtype=torch.float32)
+                    state_parts.append(s.view(s.size(0), -1))
+                else:
+                    logging.debug(f"State key '{k}' not in batch; predict() will use zero padding.")
+            if len(state_parts) > 0:
+                state = torch.cat(state_parts, dim=1).to(next(self.parameters()).device)
 
+        # predict() will handle None state by using zeros if state_mlp exists
         if self.config.num_classes == 2:
-            probs = self.predict(images).probabilities
-            logging.debug(f"Predicted reward images: {probs}")
+            probs = self.predict(images, state).probabilities
+            logging.debug(f"Predicted reward probs: {probs}")
             return (probs > threshold).float()
         else:
-            return torch.argmax(self.predict(images).probabilities, dim=1)
+            return torch.argmax(self.predict(images, state).probabilities, dim=1)
 
     def get_optim_params(self):
         """Return optimizer parameters for the policy."""

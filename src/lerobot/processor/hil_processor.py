@@ -605,6 +605,7 @@ class RewardClassifierProcessorStep(ProcessorStep):
         # Calculate reward and termination
         reward = new_transition.get(TransitionKey.REWARD, 0.0)
         terminated = new_transition.get(TransitionKey.DONE, False)
+        # print("Reward:", success)
 
         if math.isclose(success, 1, abs_tol=1e-2):
             reward = self.success_reward

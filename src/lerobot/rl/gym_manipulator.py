@@ -339,13 +339,13 @@ class RobotEnv(gym.Env):
         import cv2
 
         current_observation = self._get_observation()
-        if current_observation is not None:
-            image_keys = [key for key in current_observation if "image" in key]
+        if current_observation is not None and "pixels" in current_observation:
+            image_keys = current_observation["pixels"].keys()
 
             for key in image_keys:
                 cv2.imshow(
                     key,
-                    cv2.cvtColor(current_observation[key].numpy(), cv2.COLOR_RGB2BGR),
+                    cv2.cvtColor(current_observation["pixels"][key], cv2.COLOR_RGB2BGR),
                 )
                 cv2.waitKey(1)
 
@@ -817,6 +817,8 @@ def control_loop(
     episode_start_time = time.perf_counter()
 
     while episode_idx < cfg.dataset.num_episodes_to_record:
+        print("=======")
+        print("Episode idx:", episode_idx)
         step_start_time = time.perf_counter()
 
         # Create a neutral action (no movement).

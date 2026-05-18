@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import logging
 from typing import Any, TypedDict, Unpack
 
@@ -163,6 +164,20 @@ def get_policy_class(name: str) -> type[PreTrainedPolicy]:
             return _get_policy_cls_from_policy_name(name=name)
         except Exception as e:
             raise ValueError(f"Policy type '{name}' is not available.") from e
+
+
+def _filter_constructor_kwargs(policy_cls: type[PreTrainedPolicy], kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Drop keyword arguments that the policy constructor cannot accept.
+
+    Some policy implementations accept extra metadata such as `dataset_stats` or `dataset_meta`,
+    while others use a strict constructor signature. Filtering here keeps the factory generic
+    without forcing every policy to accept the same optional kwargs.
+    """
+    signature = inspect.signature(policy_cls)
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+        return kwargs
+
+    return {name: value for name, value in kwargs.items() if name in signature.parameters}
 
 
 def make_policy_config(policy_type: str, **kwargs) -> PreTrainedConfig:
@@ -534,8 +549,10 @@ def make_policy(
     if cfg.pretrained_path and not cfg.use_peft:
         # Load a pretrained policy and override the config if needed (for example, if there are inference-time
         # hyperparameters that we want to vary).
-        kwargs["pretrained_name_or_path"] = cfg.pretrained_path
-        policy = policy_cls.from_pretrained(**kwargs)
+        policy = policy_cls.from_pretrained(
+            pretrained_name_or_path=cfg.pretrained_path,
+            **_filter_constructor_kwargs(policy_cls, kwargs),
+        )
     elif cfg.pretrained_path and cfg.use_peft:
         # Load a pretrained PEFT model on top of the policy. The pretrained path points to the folder/repo
         # of the adapter and the adapter's config contains the path to the base policy. So we need the
@@ -556,12 +573,15 @@ def make_policy(
                 "the adapter was trained."
             )
 
-        policy = policy_cls.from_pretrained(**kwargs)
+        policy = policy_cls.from_pretrained(
+            pretrained_name_or_path=kwargs["pretrained_name_or_path"],
+            **_filter_constructor_kwargs(policy_cls, kwargs),
+        )
         policy = PeftModel.from_pretrained(policy, peft_pretrained_path, config=peft_config)
 
     else:
         # Make a fresh policy.
-        policy = policy_cls(**kwargs)
+        policy = policy_cls(**_filter_constructor_kwargs(policy_cls, kwargs))
 
     policy.to(cfg.device)
     assert isinstance(policy, torch.nn.Module)

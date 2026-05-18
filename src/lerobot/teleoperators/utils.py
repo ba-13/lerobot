@@ -32,6 +32,7 @@ class TeleopEvents(Enum):
     IS_INTERVENTION = "is_intervention"
     TERMINATE_EPISODE = "terminate_episode"
 
+
 class KeyboardTeleopEvents:
     """Keyboard-based episode control for teleoperators without hardware buttons.
 
@@ -85,6 +86,7 @@ class KeyboardTeleopEvents:
                     self._event_queue.put("failure")
                 elif hasattr(key, "char"):
                     if key.char == "s":
+                        # print("Success!")
                         self._success_active = True
                     elif key.char == "r":
                         self._event_queue.put("rerecord")
