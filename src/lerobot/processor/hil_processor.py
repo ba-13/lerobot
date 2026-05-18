@@ -391,9 +391,9 @@ class GripperPenaltyProcessorStep(ProcessorStep):
         gripper_state_normalized = current_gripper_pos / self.max_gripper_pos
 
         # Calculate penalty boolean as in original
-        gripper_penalty_bool = (gripper_state_normalized < 0.5 and gripper_action_normalized > 0.5) or (
-            gripper_state_normalized > 0.75 and gripper_action_normalized < 0.5
-        )
+        gripper_penalty_bool = (
+            gripper_state_normalized < 0.5 and gripper_action_normalized > 0.5
+        ) or (gripper_state_normalized > 0.75 and gripper_action_normalized < 0.5)
 
         gripper_penalty = self.penalty * int(gripper_penalty_bool)
 
@@ -444,6 +444,7 @@ class InterventionActionProcessorStep(ProcessorStep):
 
     use_gripper: bool = False
     terminate_on_success: bool = True
+    control_mode: str = "gamepad"
 
     def __call__(self, transition: EnvTransition) -> EnvTransition:
         """
@@ -474,20 +475,26 @@ class InterventionActionProcessorStep(ProcessorStep):
         # Override action if intervention is active
         if is_intervention and teleop_action is not None:
             if isinstance(teleop_action, dict):
-                # Convert teleop_action dict to tensor format
-                action_list = [
-                    teleop_action.get("delta_x", 0.0),
-                    teleop_action.get("delta_y", 0.0),
-                    teleop_action.get("delta_z", 0.0),
-                ]
-                if self.use_gripper:
-                    action_list.append(teleop_action.get(GRIPPER_KEY, 1.0))
+                if self.control_mode == "leader":
+                    # Joint position mode (leader arm) — values are direct joint positions
+                    action_list = list(teleop_action.values())
+                else:
+                    # End-effector delta mode (gamepad/keyboard EE)
+                    action_list = [
+                        teleop_action.get("delta_x", 0.0),
+                        teleop_action.get("delta_y", 0.0),
+                        teleop_action.get("delta_z", 0.0),
+                    ]
+                    if self.use_gripper:
+                        action_list.append(teleop_action.get(GRIPPER_KEY, 1.0))
             elif isinstance(teleop_action, np.ndarray):
                 action_list = teleop_action.tolist()
             else:
                 action_list = teleop_action
 
-            teleop_action_tensor = torch.tensor(action_list, dtype=action.dtype, device=action.device)
+            teleop_action_tensor = torch.tensor(
+                action_list, dtype=action.dtype, device=action.device
+            )
             new_transition[TransitionKey.ACTION] = teleop_action_tensor
 
         # Handle episode termination
@@ -520,6 +527,7 @@ class InterventionActionProcessorStep(ProcessorStep):
         return {
             "use_gripper": self.use_gripper,
             "terminate_on_success": self.terminate_on_success,
+            "control_mode": self.control_mode,
         }
 
     def transform_features(
@@ -588,7 +596,9 @@ class RewardClassifierProcessorStep(ProcessorStep):
         # Run reward classifier
         start_time = time.perf_counter()
         with torch.inference_mode():
-            success = self.reward_classifier.predict_reward(images, threshold=self.success_threshold)
+            success = self.reward_classifier.predict_reward(
+                images, threshold=self.success_threshold
+            )
 
         classifier_frequency = 1 / (time.perf_counter() - start_time)
 
