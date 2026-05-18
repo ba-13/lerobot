@@ -135,6 +135,7 @@ class RobotEnv(gym.Env):
         reset_pose: list[float] | None = None,
         reset_time_s: float = 5.0,
         control_mode: str = "gamepad",
+        place_position: np.ndarray | None = None,
     ) -> None:
         """Initialize robot environment with configuration options.
 
@@ -144,12 +145,13 @@ class RobotEnv(gym.Env):
             display_cameras: Whether to show camera feeds during execution.
             reset_pose: Joint positions for environment reset.
             reset_time_s: Time to wait during reset.
+            place_position: Fixed target position for the place goal, appended to
+                observation.state every step (e.g. [x, y, z] in metres).
         """
         super().__init__()
 
         self.robot = robot
         self.display_cameras = display_cameras
-        self.control_mode = control_mode
 
         # Connect to the robot if not already connected.
         if not self.robot.is_connected:
@@ -181,6 +183,12 @@ class RobotEnv(gym.Env):
         joint_positions = np.array(
             [raw_joint_joint_position[f"{name}.pos"] for name in self._joint_names]
         )
+
+        if self.place_position is not None:
+            joint_positions = np.concatenate([joint_positions, self.place_position])
+
+        if self.place_position is not None:
+            joint_positions = np.concatenate([joint_positions, self.place_position])
 
         images = {key: obs_dict[key] for key in self._image_keys}
 
@@ -430,6 +438,10 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
                 f"Leader and follower motor key order must match for joint-position control. "
                 f"Leader: {leader_keys}, Follower: {follower_keys}"
             )
+    place_position = None
+    if cfg.processor.observation is not None and cfg.processor.observation.place_position is not None:
+        place_position = np.array(cfg.processor.observation.place_position, dtype=np.float32)
+    
 
     env = RobotEnv(
         robot=robot,
@@ -437,6 +449,7 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         display_cameras=display_cameras,
         reset_pose=reset_pose,
         control_mode=control_mode,
+        place_position=place_position,
     )
 
     return env, teleop_device

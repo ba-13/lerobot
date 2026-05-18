@@ -207,6 +207,7 @@ class ObservationConfig:
     add_current_to_observation: bool = False
     add_ee_pose_to_observation: bool = False
     display_cameras: bool = False
+    place_position: list[float] | None = None
 
 
 @dataclass
