@@ -304,11 +304,11 @@ class GamepadController(InputController):
         try:
             # Read joystick axes
             # Left stick X and Y (typically axes 0 and 1)
-            y_input = self.joystick.get_axis(0)  # Up/Down (often inverted)
-            x_input = self.joystick.get_axis(1)  # Left/Right
+            y_input = self.joystick.get_axis(0)
+            x_input = self.joystick.get_axis(1)
             # print(x_input, y_input)
             # Right stick Y (typically axis 3 or 4)
-            z_input = self.joystick.get_axis(3)  # Up/Down for Z
+            z_input = self.joystick.get_axis(4)
 
             # Apply deadzone to avoid drift
             x_input = 0 if abs(x_input) < self.deadzone else x_input

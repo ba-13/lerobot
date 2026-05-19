@@ -83,7 +83,8 @@ from .joint_observations_processor import (
     MotorCurrentProcessorStep,
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, force=True)
+logging.getLogger().setLevel(logging.INFO)
 
 
 @dataclass
@@ -669,13 +670,13 @@ def step_env_and_process_transition(
     transition[TransitionKey.OBSERVATION] = (
         env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
     )
-    print(f"[DEBUG] Action value: {action}")
+    # print(f"[DEBUG] Action value: {action}")
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
-    print(
-        f"[DEBUG] Action shape after processor: {processed_action.shape if isinstance(processed_action, torch.Tensor) else 'not tensor'}"
-    )
-    print(f"[DEBUG] Processed action value: {processed_action}")
+    # print(
+    #     f"[DEBUG] Action shape after processor: {processed_action.shape if isinstance(processed_action, torch.Tensor) else 'not tensor'}"
+    # )
+    # print(f"[DEBUG] Processed action value: {processed_action}")
     # print(f"[DEBUG] Expected motors: {list(env.robot.bus.motors.keys())}")
 
     obs, reward, terminated, truncated, info = env.step(processed_action)
@@ -743,7 +744,7 @@ def control_loop(
         observation=obs, info=info, complementary_data=complementary_data
     )
     transition = env_processor(data=transition)
-    print(transition[TransitionKey.OBSERVATION])
+    # print(transition[TransitionKey.OBSERVATION])
 
     # Determine if gripper is used
     use_gripper = (
