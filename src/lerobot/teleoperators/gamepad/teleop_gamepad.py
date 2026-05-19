@@ -80,6 +80,7 @@ class GamepadTeleop(Teleoperator):
         if sys.platform == "darwin":
             # NOTE: On macOS, pygame doesn’t reliably detect input from some controllers so we fall back to hidapi
             from .gamepad_utils import GamepadControllerHID as Gamepad
+            raise ValueError("Not supported")
         else:
             from .gamepad_utils import GamepadController as Gamepad
 
@@ -137,6 +138,7 @@ class GamepadTeleop(Teleoperator):
 
         # Check if intervention is active
         is_intervention = self.gamepad.should_intervene()
+        is_success = self.gamepad.should_mark_success()
 
         # Get episode end status
         episode_end_status = self.gamepad.get_episode_end_status()
@@ -144,13 +146,12 @@ class GamepadTeleop(Teleoperator):
             TeleopEvents.RERECORD_EPISODE,
             TeleopEvents.FAILURE,
         ]
-        success = episode_end_status == TeleopEvents.SUCCESS
         rerecord_episode = episode_end_status == TeleopEvents.RERECORD_EPISODE
 
         return {
             TeleopEvents.IS_INTERVENTION: is_intervention,
             TeleopEvents.TERMINATE_EPISODE: terminate_episode,
-            TeleopEvents.SUCCESS: success,
+            TeleopEvents.SUCCESS: is_success,
             TeleopEvents.RERECORD_EPISODE: rerecord_episode,
         }
 

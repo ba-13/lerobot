@@ -791,7 +791,7 @@ class DiscreteCritic(nn.Module):
         self, observations: torch.Tensor, observation_features: torch.Tensor | None = None
     ) -> torch.Tensor:
         device = get_device_from_parameters(self)
-        observations = {k: v.to(device) for k, v in observations.items()}
+        observations = {k: (torch.tensor(v)).to(device) for k, v in observations.items()}
         obs_enc = self.encoder(observations, cache=observation_features)
         return self.output_layer(self.net(obs_enc))
 

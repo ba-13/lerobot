@@ -37,7 +37,7 @@ def move_transition_to_device(transition: Transition, device: str = "cpu") -> Tr
 
     # Move state tensors to device
     transition["state"] = {
-        key: val.to(device, non_blocking=non_blocking) for key, val in transition["state"].items()
+        key: (torch.tensor(val)).to(device, non_blocking=non_blocking) for key, val in transition["state"].items()
     }
 
     # Move action to device
@@ -55,14 +55,14 @@ def move_transition_to_device(transition: Transition, device: str = "cpu") -> Tr
 
     # Move next_state tensors to device
     transition["next_state"] = {
-        key: val.to(device, non_blocking=non_blocking) for key, val in transition["next_state"].items()
+        key: (torch.tensor(val)).to(device, non_blocking=non_blocking) for key, val in transition["next_state"].items()
     }
 
     # Move complementary_info tensors if present
     if transition.get("complementary_info") is not None:
         for key, val in transition["complementary_info"].items():
             if isinstance(val, torch.Tensor):
-                transition["complementary_info"][key] = val.to(device, non_blocking=non_blocking)
+                transition["complementary_info"][key] = (torch.tensor(val)).to(device, non_blocking=non_blocking)
             elif isinstance(val, (int | float | bool)):
                 transition["complementary_info"][key] = torch.tensor(val, device=device)
             else:

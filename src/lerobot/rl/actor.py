@@ -334,7 +334,7 @@ def act_with_policy(
 
         # Teleop action is the action that was executed in the environment
         # It is either the action from the teleop device or the action from the policy
-        executed_action = new_transition[TransitionKey.COMPLEMENTARY_DATA]["teleop_action"]
+        executed_action = new_transition[TransitionKey.ACTION]
 
         reward = new_transition[TransitionKey.REWARD]
         done = new_transition.get(TransitionKey.DONE, False)

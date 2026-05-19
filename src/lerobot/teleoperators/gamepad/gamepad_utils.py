@@ -36,6 +36,7 @@ class InputController:
         self.z_step_size = z_step_size
         self.running = True
         self.episode_end_status = None  # None, "success", or "failure"
+        self.is_success_flag = False
         self.intervention_flag = False
         self.open_gripper_command = False
         self.close_gripper_command = False
@@ -75,6 +76,9 @@ class InputController:
         status = self.episode_end_status
         self.episode_end_status = None  # Reset after reading
         return status
+
+    def should_mark_success(self):
+        return self.is_success_flag
 
     def should_intervene(self):
         """Return True if intervention flag was set."""
@@ -198,6 +202,11 @@ class KeyboardController(InputController):
 class GamepadController(InputController):
     """Generate motion deltas from gamepad input."""
 
+    A = 0
+    B = 1
+    X = 2
+    Y = 3
+
     def __init__(self, x_step_size=1.0, y_step_size=1.0, z_step_size=1.0, deadzone=0.1):
         super().__init__(x_step_size, y_step_size, z_step_size)
         self.deadzone = deadzone
@@ -225,10 +234,10 @@ class GamepadController(InputController):
         print("Gamepad controls:")
         print("  Left analog stick: Move in X-Y plane")
         print("  Right analog stick (vertical): Move in Z axis")
-        print("  B/Circle button: Exit")
+        print("  B/Circle button: End episode with FAILURE")
         print("  Y/Triangle button: End episode with SUCCESS")
-        print("  A/Cross button: End episode with FAILURE")
-        print("  X/Square button: Rerecord episode")
+        print("  A/Cross button: Rerecord episode")
+        print("  X/Square button: Exit")
 
     def stop(self):
         """Clean up pygame resources."""
@@ -246,21 +255,18 @@ class GamepadController(InputController):
 
         for event in pygame.event.get():
             if event.type == pygame.JOYBUTTONDOWN:
-                if event.button == 3:
-                    print("Success")
-                    self.episode_end_status = TeleopEvents.SUCCESS
                 # A button (1) for failure
-                elif event.button == 1:
+                if event.button == self.B:
                     print("Failure")
                     self.episode_end_status = TeleopEvents.FAILURE
                 # X button (0) for rerecord
-                elif event.button == 0:
+                elif event.button == self.A:
                     print("Rerecord")
                     self.episode_end_status = TeleopEvents.RERECORD_EPISODE
 
             # Reset episode status on button release
             elif event.type == pygame.JOYBUTTONUP:
-                if event.button in [0, 2, 3]:
+                if event.button in [self.A, self.X, self.Y]:
                     print("Episode end status None")
                     self.episode_end_status = None
 
@@ -290,6 +296,14 @@ class GamepadController(InputController):
                         if self.open_gripper_command:
                             print("Open Gripper false")
                         self.open_gripper_command = False
+
+            # --- Continuous Polling Section (Evaluated every single frame) ---
+
+            if self.joystick.get_button(self.Y):
+                self.is_success_flag = True
+            else:
+                # If button 3 is released, immediately drop the success status
+                self.is_success_flag = False
 
             # Check for RB button (typically button 5) for intervention flag
             if self.joystick.get_button(5):
