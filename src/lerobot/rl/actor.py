@@ -102,7 +102,8 @@ from .gym_manipulator import (
 
 @parser.wrap()
 def actor_cli(cfg: TrainRLServerPipelineConfig):
-    cfg.validate()
+    # cfg.validate()
+    validate_actor_cfg(cfg) # to allow output_dir
     display_pid = False
     if not use_threads(cfg):
         import torch.multiprocessing as mp
@@ -202,6 +203,27 @@ def actor_cli(cfg: TrainRLServerPipelineConfig):
     parameters_queue.cancel_join_thread()
 
     logging.info("[ACTOR] queues closed")
+
+
+def validate_actor_cfg(cfg: TrainRLServerPipelineConfig) -> None:
+    """Validate only the fields required by the actor process.
+
+    The generic training validation forbids an existing output directory when
+    resume=False. That rule is correct for the learner (which creates runs),
+    but the actor must attach to an already running learner using the same
+    config and output directory.
+    """
+    if cfg.policy is None:
+        raise ValueError("Policy is not configured. Please provide a valid policy config.")
+
+    if not cfg.job_name:
+        if cfg.env is None:
+            cfg.job_name = f"{cfg.policy.type}"
+        else:
+            cfg.job_name = f"{cfg.env.type}_{cfg.policy.type}"
+
+    if not cfg.output_dir:
+        raise ValueError("output_dir must be set for actor runs.")
 
 
 # Core algorithm functions

@@ -86,7 +86,7 @@ class KeyboardTeleopEvents:
                     self._event_queue.put("failure")
                 elif hasattr(key, "char"):
                     if key.char == "s":
-                        # print("Success!")
+                        print("===> Counted as success!")
                         self._success_active = True
                     elif key.char == "r":
                         self._event_queue.put("rerecord")

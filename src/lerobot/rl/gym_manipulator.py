@@ -135,7 +135,6 @@ class RobotEnv(gym.Env):
         reset_pose: list[float] | None = None,
         reset_time_s: float = 5.0,
         control_mode: str = "gamepad",
-        place_position: np.ndarray | None = None,
     ) -> None:
         """Initialize robot environment with configuration options.
 
@@ -145,8 +144,6 @@ class RobotEnv(gym.Env):
             display_cameras: Whether to show camera feeds during execution.
             reset_pose: Joint positions for environment reset.
             reset_time_s: Time to wait during reset.
-            place_position: Fixed target position for the place goal, appended to
-                observation.state every step (e.g. [x, y, z] in metres).
         """
         super().__init__()
 
@@ -160,6 +157,8 @@ class RobotEnv(gym.Env):
         # Episode tracking.
         self.current_step = 0
         self.episode_data = None
+
+        self.control_mode = control_mode
 
         self._joint_names = [f"{key}.pos" for key in self.robot.bus.motors]
         self._image_keys = self.robot.cameras.keys()
@@ -183,12 +182,6 @@ class RobotEnv(gym.Env):
         joint_positions = np.array(
             [raw_joint_joint_position[f"{name}.pos"] for name in self._joint_names]
         )
-
-        if self.place_position is not None:
-            joint_positions = np.concatenate([joint_positions, self.place_position])
-
-        if self.place_position is not None:
-            joint_positions = np.concatenate([joint_positions, self.place_position])
 
         images = {key: obs_dict[key] for key in self._image_keys}
 
@@ -438,10 +431,6 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
                 f"Leader and follower motor key order must match for joint-position control. "
                 f"Leader: {leader_keys}, Follower: {follower_keys}"
             )
-    place_position = None
-    if cfg.processor.observation is not None and cfg.processor.observation.place_position is not None:
-        place_position = np.array(cfg.processor.observation.place_position, dtype=np.float32)
-    
 
     env = RobotEnv(
         robot=robot,
@@ -449,7 +438,6 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         display_cameras=display_cameras,
         reset_pose=reset_pose,
         control_mode=control_mode,
-        place_position=place_position,
     )
 
     return env, teleop_device
@@ -681,8 +669,14 @@ def step_env_and_process_transition(
     transition[TransitionKey.OBSERVATION] = (
         env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
     )
+    print(f"[DEBUG] Action value: {action}")
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
+    print(
+        f"[DEBUG] Action shape after processor: {processed_action.shape if isinstance(processed_action, torch.Tensor) else 'not tensor'}"
+    )
+    print(f"[DEBUG] Processed action value: {processed_action}")
+    # print(f"[DEBUG] Expected motors: {list(env.robot.bus.motors.keys())}")
 
     obs, reward, terminated, truncated, info = env.step(processed_action)
 
@@ -749,6 +743,7 @@ def control_loop(
         observation=obs, info=info, complementary_data=complementary_data
     )
     transition = env_processor(data=transition)
+    print(transition[TransitionKey.OBSERVATION])
 
     # Determine if gripper is used
     use_gripper = (
@@ -788,17 +783,24 @@ def control_loop(
             }
 
         for key, value in transition[TransitionKey.OBSERVATION].items():
-            if key == OBS_STATE:
+            if key == OBS_STATE:  # this comes from agent_pos
                 features[key] = {
                     "dtype": "float32",
                     "shape": value.squeeze(0).shape,
-                    "names": None,
+                    "names": env._joint_names,
                 }
             if "image" in key:
                 features[key] = {
                     "dtype": "video",
                     "shape": value.squeeze(0).shape,
                     "names": ["channels", "height", "width"],
+                }
+            if "ee" in key:
+                # add ee keys within observation attribute
+                features[key] = {
+                    "dtype": "float32",
+                    "shape": (1,),
+                    "names": key,
                 }
 
         # Create dataset
@@ -817,8 +819,6 @@ def control_loop(
     episode_start_time = time.perf_counter()
 
     while episode_idx < cfg.dataset.num_episodes_to_record:
-        print("=======")
-        print("Episode idx:", episode_idx)
         step_start_time = time.perf_counter()
 
         # Create a neutral action (no movement).
@@ -843,10 +843,18 @@ def control_loop(
         truncated = transition.get(TransitionKey.TRUNCATED, False)
 
         if cfg.mode == "record":
+            logging.info(
+                f'ee.pose: {transition[TransitionKey.OBSERVATION]["observation.ee.x"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.y"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.z"]:.3f}, ee.gripper_pos: {transition[TransitionKey.OBSERVATION]["observation.ee.gripper_pos"]:.3f}'
+            )
             observations = {
-                k: v.squeeze(0).cpu()
+                k: (
+                    v.squeeze(0).cpu()
+                    if isinstance(v, torch.Tensor)
+                    else np.array(
+                        [v], dtype=np.float32
+                    )  # this is for individual EE pose
+                )
                 for k, v in transition[TransitionKey.OBSERVATION].items()
-                if isinstance(v, torch.Tensor)
             }
             # Use teleop_action if available, otherwise use the action from the transition
             action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get(
@@ -858,6 +866,7 @@ def control_loop(
                 REWARD: np.array([transition[TransitionKey.REWARD]], dtype=np.float32),
                 DONE: np.array([terminated or truncated], dtype=bool),
             }
+
             if use_gripper:
                 discrete_penalty = transition[TransitionKey.COMPLEMENTARY_DATA].get(
                     "discrete_penalty", 0.0
@@ -874,6 +883,8 @@ def control_loop(
 
         # Handle episode termination
         if terminated or truncated:
+            print("=======")
+            print("Going to episode idx:", episode_idx)
             episode_time = time.perf_counter() - episode_start_time
             logging.info(
                 f"Episode ended after {episode_step} steps in {episode_time:.1f}s with reward {transition[TransitionKey.REWARD]}"

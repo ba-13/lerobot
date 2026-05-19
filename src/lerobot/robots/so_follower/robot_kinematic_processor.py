@@ -187,6 +187,7 @@ class EEReferenceAndDelta(RobotActionProcessorStep):
 class EEBoundsAndSafety(RobotActionProcessorStep):
     """
     Clips the end-effector pose to predefined bounds and checks for unsafe jumps.
+    Ignores the gripper
 
     This step ensures that the target end-effector pose remains within a safe operational workspace.
     It also moderates the command to prevent large, sudden movements between consecutive steps.
@@ -402,7 +403,10 @@ class GripperVelocityToJoint(RobotActionProcessorStep):
 
 
 def compute_forward_kinematics_joints_to_ee(
-    joints: dict[str, Any], kinematics: RobotKinematics, motor_names: list[str]
+    joints: dict[str, Any],
+    kinematics: RobotKinematics,
+    motor_names: list[str],
+    prefix: str = "observation.",
 ) -> dict[str, Any]:
     motor_joint_values = [joints[f"{n}.pos"] for n in motor_names]
 
@@ -413,13 +417,13 @@ def compute_forward_kinematics_joints_to_ee(
     gripper_pos = joints["gripper.pos"]
     for n in motor_names:
         joints.pop(f"{n}.pos")
-    joints["ee.x"] = float(pos[0])
-    joints["ee.y"] = float(pos[1])
-    joints["ee.z"] = float(pos[2])
-    joints["ee.wx"] = float(tw[0])
-    joints["ee.wy"] = float(tw[1])
-    joints["ee.wz"] = float(tw[2])
-    joints["ee.gripper_pos"] = float(gripper_pos)
+    joints[f"{prefix}ee.x"] = float(pos[0])
+    joints[f"{prefix}ee.y"] = float(pos[1])
+    joints[f"{prefix}ee.z"] = float(pos[2])
+    joints[f"{prefix}ee.wx"] = float(tw[0])
+    joints[f"{prefix}ee.wy"] = float(tw[1])
+    joints[f"{prefix}ee.wz"] = float(tw[2])
+    joints[f"{prefix}ee.gripper_pos"] = float(gripper_pos)
     return joints
 
 
@@ -440,7 +444,12 @@ class ForwardKinematicsJointsToEEObservation(ObservationProcessorStep):
     motor_names: list[str]
 
     def observation(self, observation: RobotObservation) -> RobotObservation:
-        return compute_forward_kinematics_joints_to_ee(observation, self.kinematics, self.motor_names)
+        return compute_forward_kinematics_joints_to_ee(
+            observation,
+            self.kinematics,
+            self.motor_names,
+            prefix="observation.",
+        )
 
     def transform_features(
         self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
@@ -450,7 +459,7 @@ class ForwardKinematicsJointsToEEObservation(ObservationProcessorStep):
             features[PipelineFeatureType.OBSERVATION].pop(f"{n}.pos", None)
         # We specify the dataset features of this step that we want to be stored in the dataset
         for k in ["x", "y", "z", "wx", "wy", "wz", "gripper_pos"]:
-            features[PipelineFeatureType.OBSERVATION][f"ee.{k}"] = PolicyFeature(
+            features[PipelineFeatureType.OBSERVATION][f"observation.ee.{k}"] = PolicyFeature(
                 type=FeatureType.STATE, shape=(1,)
             )
         return features
@@ -473,7 +482,12 @@ class ForwardKinematicsJointsToEEAction(RobotActionProcessorStep):
     motor_names: list[str]
 
     def action(self, action: RobotAction) -> RobotAction:
-        return compute_forward_kinematics_joints_to_ee(action, self.kinematics, self.motor_names)
+        return compute_forward_kinematics_joints_to_ee(
+            action,
+            self.kinematics,
+            self.motor_names,
+            prefix="",
+        )
 
     def transform_features(
         self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]

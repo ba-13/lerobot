@@ -212,7 +212,9 @@ class GamepadController(InputController):
         pygame.joystick.init()
 
         if pygame.joystick.get_count() == 0:
-            logging.error("No gamepad detected. Please connect a gamepad and try again.")
+            logging.error(
+                "No gamepad detected. Please connect a gamepad and try again."
+            )
             self.running = False
             return
 
@@ -245,32 +247,49 @@ class GamepadController(InputController):
         for event in pygame.event.get():
             if event.type == pygame.JOYBUTTONDOWN:
                 if event.button == 3:
+                    print("Success")
                     self.episode_end_status = TeleopEvents.SUCCESS
                 # A button (1) for failure
                 elif event.button == 1:
+                    print("Failure")
                     self.episode_end_status = TeleopEvents.FAILURE
                 # X button (0) for rerecord
                 elif event.button == 0:
+                    print("Rerecord")
                     self.episode_end_status = TeleopEvents.RERECORD_EPISODE
-
-                # RB button (6) for closing gripper
-                elif event.button == 6:
-                    self.close_gripper_command = True
-
-                # LT button (7) for opening gripper
-                elif event.button == 7:
-                    self.open_gripper_command = True
 
             # Reset episode status on button release
             elif event.type == pygame.JOYBUTTONUP:
                 if event.button in [0, 2, 3]:
+                    print("Episode end status None")
                     self.episode_end_status = None
 
-                elif event.button == 6:
-                    self.close_gripper_command = False
+            # Handle Analog Triggers for Gripper Control
+            elif event.type == pygame.JOYAXISMOTION:
+                # Assuming triggers go from -1.0 (unpressed) to 1.0 (fully pressed)
+                # We use a threshold of 0.5 to register a deliberate squeeze
 
-                elif event.button == 7:
-                    self.open_gripper_command = False
+                # Right Trigger (RT) - Axis 5: Close Gripper
+                if event.axis == 5:
+                    if event.value > 0.5:
+                        if not self.close_gripper_command:
+                            print("Close gripper (RT)")
+                        self.close_gripper_command = True
+                    else:
+                        if self.close_gripper_command:
+                            print("Close Gripper false")
+                        self.close_gripper_command = False
+
+                # Left Trigger (LT) - Axis 2: Open Gripper
+                elif event.axis == 2:
+                    if event.value > 0.5:
+                        if not self.open_gripper_command:
+                            print("Open gripper (LT)")
+                        self.open_gripper_command = True
+                    else:
+                        if self.open_gripper_command:
+                            print("Open Gripper false")
+                        self.open_gripper_command = False
 
             # Check for RB button (typically button 5) for intervention flag
             if self.joystick.get_button(5):
@@ -287,7 +306,7 @@ class GamepadController(InputController):
             # Left stick X and Y (typically axes 0 and 1)
             y_input = self.joystick.get_axis(0)  # Up/Down (often inverted)
             x_input = self.joystick.get_axis(1)  # Left/Right
-
+            # print(x_input, y_input)
             # Right stick Y (typically axis 3 or 4)
             z_input = self.joystick.get_axis(3)  # Up/Down for Z
 
@@ -347,7 +366,10 @@ class GamepadControllerHID(InputController):
         devices = hid.enumerate()
         for device in devices:
             device_name = device["product_string"]
-            if any(controller in device_name for controller in ["Logitech", "Xbox", "PS4", "PS5"]):
+            if any(
+                controller in device_name
+                for controller in ["Logitech", "Xbox", "PS4", "PS5"]
+            ):
                 return device
 
         logging.error(
@@ -383,7 +405,9 @@ class GamepadControllerHID(InputController):
 
         except OSError as e:
             logging.error(f"Error opening gamepad: {e}")
-            logging.error("You might need to run this with sudo/admin privileges on some systems")
+            logging.error(
+                "You might need to run this with sudo/admin privileges on some systems"
+            )
             self.running = False
 
     def stop(self):
