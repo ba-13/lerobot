@@ -362,19 +362,21 @@ class Classifier(PreTrainedPolicy):
             for k in self.state_keys:
                 if k in batch:
                     s = torch.as_tensor(batch[k])
-                    if s.ndim == 1:
+                    if s.ndim == 0: # this is done to handle scalar values
+                        s = s.unsqueeze(0).unsqueeze(0)
+                    elif s.ndim == 1:
                         s = s.unsqueeze(0)
                     s = s.to(dtype=torch.float32)
-                    state_parts.append(s.view(s.size(0), -1))
+                    state_parts.append(s.reshape(s.size(0), -1))
                 else:
-                    logging.debug(f"State key '{k}' not in batch; predict() will use zero padding.")
+                    logging.info(f"State key '{k}' not in batch; predict() will use zero padding.")
             if len(state_parts) > 0:
                 state = torch.cat(state_parts, dim=1).to(next(self.parameters()).device)
 
         # predict() will handle None state by using zeros if state_mlp exists
         if self.config.num_classes == 2:
             probs = self.predict(images, state).probabilities
-            logging.debug(f"Predicted reward probs: {probs}")
+            logging.info(f"Predicted reward probs: {probs}")
             return (probs > threshold).float()
         else:
             return torch.argmax(self.predict(images, state).probabilities, dim=1)

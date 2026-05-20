@@ -587,17 +587,16 @@ class RewardClassifierProcessorStep(ProcessorStep):
         if observation is None or self.reward_classifier is None:
             return new_transition
 
-        # Extract images from observation
-        images = {key: value for key, value in observation.items() if "image" in key}
-
-        if not images:
+        # Keep the full observation dict so the reward model can read both images
+        # and any configured state features such as observation.ee.z.
+        if not observation:
             return new_transition
 
         # Run reward classifier
         start_time = time.perf_counter()
         with torch.inference_mode():
             success = self.reward_classifier.predict_reward(
-                images, threshold=self.success_threshold
+                observation, threshold=self.success_threshold
             )
 
         classifier_frequency = 1 / (time.perf_counter() - start_time)
