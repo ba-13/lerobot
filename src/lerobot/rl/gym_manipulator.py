@@ -665,6 +665,8 @@ def step_env_and_process_transition(
         Processed transition with updated state.
     """
 
+    policy_action_4d = action.clone()
+
     # Create action transition
     transition[TransitionKey.ACTION] = action
     transition[TransitionKey.OBSERVATION] = (
@@ -690,9 +692,14 @@ def step_env_and_process_transition(
     new_info = processed_action_transition[TransitionKey.INFO].copy()
     new_info.update(info)
 
+    # 2. THE BYPASS: Determine the correct 4D action for the replay buffer.
+    # If the human intervened, use the 4D gamepad action.
+    # Otherwise, use the original 4D policy action.
+    action_to_record = complementary_data.get("teleop_action", policy_action_4d)
+
     new_transition = create_transition(
         observation=obs,
-        action=processed_action,
+        action=action_to_record,
         reward=reward,
         done=terminated,
         truncated=truncated,
@@ -858,12 +865,12 @@ def control_loop(
                 for k, v in transition[TransitionKey.OBSERVATION].items()
             }
             # Use teleop_action if available, otherwise use the action from the transition
-            action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get(
-                "teleop_action", transition[TransitionKey.ACTION]
-            )
+            # action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get(
+            #     "teleop_action", transition[TransitionKey.ACTION]
+            # )
             frame = {
                 **observations,
-                ACTION: action_to_record.cpu(),
+                ACTION: transition[TransitionKey.ACTION].squeeze(0).cpu(),
                 REWARD: np.array([transition[TransitionKey.REWARD]], dtype=np.float32),
                 DONE: np.array([terminated or truncated], dtype=bool),
             }
