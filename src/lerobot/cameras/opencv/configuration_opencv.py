@@ -63,7 +63,7 @@ class OpenCVCameraConfig(CameraConfig):
     rotation: Cv2Rotation = Cv2Rotation.NO_ROTATION
     warmup_s: int = 1
     fourcc: str | None = None
-    backend: Cv2Backends = Cv2Backends.ANY
+    backend: Cv2Backends = Cv2Backends.V4L2
 
     def __post_init__(self) -> None:
         self.color_mode = ColorMode(self.color_mode)
