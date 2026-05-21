@@ -619,7 +619,7 @@ def make_processors(
             ),
             GripperVelocityToJoint(
                 clip_max=cfg.processor.max_gripper_pos,
-                speed_factor=1.0,
+                speed_factor=0.5,
                 discrete_gripper=True,
             ),
             InverseKinematicsRLStep(
@@ -852,7 +852,7 @@ def control_loop(
 
         if cfg.mode == "record":
             logging.info(
-                f'ee.pose: {transition[TransitionKey.OBSERVATION]["observation.ee.x"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.y"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.z"]:.3f}, ee.gripper_pos: {transition[TransitionKey.OBSERVATION]["observation.ee.gripper_pos"]:.3f}'
+                f'ee.pose: {transition[TransitionKey.OBSERVATION]["observation.ee.x"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.y"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.z"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.wx"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.wy"]:.3f}, {transition[TransitionKey.OBSERVATION]["observation.ee.wz"]:.3f}, ee.gripper_pos: {transition[TransitionKey.OBSERVATION]["observation.ee.gripper_pos"]:.3f}'
             )
             observations = {
                 k: (

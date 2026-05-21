@@ -51,6 +51,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from pprint import pformat
+from typing import cast
 
 import grpc
 import torch
@@ -322,6 +323,34 @@ def add_actor_information_and_train(
 
     assert isinstance(policy, nn.Module)
 
+    # load the checkpoint policy
+    if cfg.resume:
+        if cfg.output_dir is None:
+            raise ValueError("output_dir must be set when resuming training")
+
+        policy_cfg = cfg.policy
+        if policy_cfg is None:
+            raise ValueError("policy must be set when resuming training")
+
+        checkpoint_pretrained_dir = (
+            Path(cfg.output_dir)
+            / CHECKPOINTS_DIR
+            / LAST_CHECKPOINT_LINK
+            / PRETRAINED_MODEL_DIR
+        )
+        logging.info(f"Loading policy weights from {checkpoint_pretrained_dir}")
+        
+        # Load the pretrained model temporarily
+        pretrained_policy = SACPolicy.from_pretrained(
+            checkpoint_pretrained_dir,
+            config=policy_cfg,
+        )
+        
+        # Load its state dictionary into our env_cfg-aware policy
+        policy.load_state_dict(pretrained_policy.state_dict())
+        
+        # Clean up to free memory
+        del pretrained_policy
     policy.train()
 
     push_actor_policy_to_queue(parameters_queue=parameters_queue, policy=policy)

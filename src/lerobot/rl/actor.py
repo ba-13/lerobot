@@ -286,6 +286,12 @@ def act_with_policy(
     policy = policy.eval()
     assert isinstance(policy, nn.Module)
 
+    logging.info("[ACTOR] Waiting for initial policy parameters from Learner")
+    while not shutdown_event.is_set():
+        if update_policy_parameters(policy=policy, parameters_queue=parameters_queue, device=device):
+            break
+        time.sleep(0.1)
+
     obs, info = online_env.reset()
     env_processor.reset()
     action_processor.reset()
@@ -722,6 +728,10 @@ def update_policy_parameters(policy: SACPolicy, parameters_queue: Queue, device)
             )
             policy.discrete_critic.load_state_dict(discrete_critic_state_dict)
             logging.info("[ACTOR] Loaded discrete critic parameters from Learner.")
+
+        return True
+
+    return False
 
 
 #  Utilities functions
